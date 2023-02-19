@@ -1,0 +1,1 @@
+Hook system prop func to simulate miui to enable MiPushFoss
