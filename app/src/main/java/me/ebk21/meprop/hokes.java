@@ -1,11 +1,10 @@
 package me.ebk21.meprop;
 
-import static de.robv.android.xposed.XposedHelpers.findClass;
+import static de.robv.android.xposed.XposedHelpers.findClassIfExists;
 import static de.robv.android.xposed.callbacks.XCallback.PRIORITY_HIGHEST;
 
 import java.lang.reflect.Member;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -13,8 +12,24 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class hokes implements IXposedHookLoadPackage {
-    private String originalprop(Member m, Object o, int length, String prop) {
-        String[] s;
+    static HashMap<String, String> hm1;
+    static HashMap<String, String> hm2;
+
+    static {
+        hm1 = new HashMap<>();
+        hm2 = new HashMap<>();
+        hm1.put("ro.miui.internal.storage", "/sdcard/");
+        hm1.put("ro.miui.ui.version.code", "10");
+        hm1.put("ro.miui.version.name", "V12");
+        hm1.put("ro.miui.version.code_time", "1592409600");
+        hm2.put("ro.product.brand", "Xiaomi");
+        hm2.put("ro.product.manufacturer", "Xiaomi");
+        hm2.put("ro.product.name", "Xiaomi");
+        hm2.put("ro.product.vendor.brand", "Xiaomi");
+    }
+
+    static private String originalprop(Member m, Object o, int length, String prop) {
+        final String[] s;
         if (length == 2) {
             s = new String[]{prop, null};
         } else {
@@ -31,58 +46,40 @@ public class hokes implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (lpparam.packageName.contains("webview") || lpparam.processName.toLowerCase().contains("webview"))
+
+        final Class<?> cls;
+        final Class<?> AP = findClassIfExists("android.os.SystemProperties", lpparam.classLoader);
+        final Class<?> SP = findClassIfExists("android.os.SystemProperties", XposedBridge.BOOTCLASSLOADER);
+        if (AP != null) {
+            cls = AP;
+        } else if (SP != null) {
+            cls = SP;
+            XposedBridge.log("MPH: " + lpparam.processName + " => Can not find system properties class in application ! Hooking framework instead...");
+        } else {
+            XposedBridge.log("MPH: " + lpparam.processName + " => Can not find system properties class in both application and framework !");
             return;
-        final ClassLoader SC = ClassLoader.getSystemClassLoader();
-        final Class<?> c = findClass("android.os.SystemProperties", SC);
-        if (c == null) return;
-        final ArrayList<String> ar = new ArrayList<>(Arrays.asList("ro.miui.internal.storage", "ro.miui.ui.version.code", "ro.miui.version.name",
-                "ro.miui.version.code_time", "ro.product.brand", "ro.product.manufacturer", "ro.product.name", "ro.product.vendor.brand"));
-        final ArrayList<String> ar2 = new ArrayList<>(Arrays.asList("/sdcard/", "10", "V12",
-                "1592409600", "Xiaomi", "Xiaomi", "Xiaomi", "Xiaomi"));
-        final ArrayList<String> ar3 = new ArrayList<>(Arrays.asList("mp.rmis", "mp.rmuvc", "mp.rmvn",
-                "mp.rmvc", "mp.rpb", "mp.rpm", "mp.rpn", "mp.rpvb"));
-        XC_MethodHook m = new XC_MethodHook(PRIORITY_HIGHEST) {
+        }
+        final XC_MethodHook m = new XC_MethodHook(PRIORITY_HIGHEST) {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                final String key = (String) param.args[0];
                 boolean isBD = false;
-                String BD = originalprop(param.method, param.thisObject, param.args.length, "mp.bd");
+                final String BD = originalprop(param.method, param.thisObject, param.args.length, "mp.bd");
                 if (BD.equals("true"))
                     isBD = true;
 
-                int index = 0;
-                for (String c : ar
-                ) {
-                    if (param.args[0].equals(c)) {
-                        if (index <= 3) {
-                            final String s;
-                            final String or = originalprop(param.method, param.thisObject, param.args.length, ar3.get(index));
-                            if (!or.equals("none")) {
-                                s = or;
-                            } else {
-                                s = ar2.get(index);
-                            }
-                            param.setResult(s);
-                            XposedBridge.log("MPH: "+lpparam.packageName+" => faking "+c+" with "+s);
-                            break;
-                        } else {
-                            if (isBD) {
-                                final String s;
-                                final String or = originalprop(param.method, param.thisObject, param.args.length, ar3.get(index));
-                                if (!or.equals("none")) {
-                                    s = or;
-                                } else {
-                                    s = ar2.get(index);
-                                }
-                                param.setResult(s);
-                            }
-                        }
-                    }
-                    ++index;
+                if (hm1.containsKey(key)) {
+                    final String s = hm1.get(key);
+                    param.setResult(s);
+                    XposedBridge.log("MPH: "+lpparam.processName+" > faking miui prop "+key+" as "+s);
+                } else if (hm2.containsKey(key) && isBD) {
+                    final String s = hm2.get(key);
+                    param.setResult(s);
+                    XposedBridge.log("MPH: "+lpparam.processName+" > faking device prop "+key+" as "+s);
                 }
 
             }
         };
-        XposedBridge.hookAllMethods(c, "get", m);
+        XposedBridge.hookAllMethods(cls, "get", m);
     }
 }
